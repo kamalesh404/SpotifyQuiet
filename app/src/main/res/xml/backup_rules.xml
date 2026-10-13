@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    allowBackup is false, so there is nothing to back up. These rules keep
+    that intent explicit and future-proof.
+-->
+<full-backup-content>
+    <exclude domain="root" path="." />
+</full-backup-content>

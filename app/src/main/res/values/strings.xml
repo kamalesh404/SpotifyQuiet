@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SpotifyQuiet</string>
+    <string name="unofficial_notice">Unofficial companion app. Not affiliated with Spotify AB.</string>
+
+    <string name="start_monitoring">Start monitoring</string>
+    <string name="stop_monitoring">Stop monitoring</string>
+    <string name="grant_notification_access">Grant notification access</string>
+    <string name="notification_access_hint">Notification access is a special access setting, not an ordinary app permission. SpotifyQuiet uses it only to read Spotify\'s media notification and active media session while monitoring is on.</string>
+
+    <string name="events_title">Playback events</string>
+    <string name="clear_log">Clear log</string>
+    <string name="clear_labels">Clear labels</string>
+    <string name="empty_log">No events yet. Start monitoring, then play something in Spotify — the log fills as playback changes.</string>
+    <string name="show_evidence">Show evidence</string>
+    <string name="hide_evidence">Hide evidence</string>
+    <string name="mark_ad">Ad</string>
+    <string name="mark_not_ad">Not ad</string>
+    <string name="labelled_ad">Labelled: real ad</string>
+    <string name="labelled_not_ad">Labelled: not an ad</string>
+
+    <string name="current_track_unknown">No track information yet</string>
+
+    <string name="recovery_title">Recovery experiment</string>
+    <string name="recovery_enable">Automatic recovery (experimental)</string>
+    <string name="recovery_description">Off by default. When enabled, SpotifyQuiet may reopen Spotify only after a high-confidence possible advertisement, with a 60 second cooldown and at most 5 attempts per session. Android can refuse to start an app from the background, so outcomes must be verified on the device.</string>
+    <string name="recovery_gesture_limitation">Android does not expose a supported API for silently swiping another app out of Recent Apps, so the manual swipe-and-reopen workaround cannot be automated here.</string>
+    <string name="recovery_attempts">attempts used: %1$d, remaining: %2$d</string>
+    <string name="reopen_spotify">Reopen Spotify now</string>
+    <string name="stop_recovery">Stop recovery</string>
+    <string name="spotify_missing">Spotify does not appear to be installed, so recovery actions are unavailable.</string>
+
+    <string name="privacy_title">Privacy</string>
+    <string name="privacy_note">Everything stays on this device. SpotifyQuiet makes no network requests, has no account, no analytics and no backend. Only the playback metadata needed for diagnosis is kept, in memory, for as long as the app process lives.</string>
+
+    <string name="clear_notice">Dismiss</string>
+
+    <plurals name="events_count">
+        <item quantity="one">%1$d event</item>
+        <item quantity="other">%1$d events</item>
+    </plurals>
+
+    <plurals name="labels_count">
+        <item quantity="one">%1$d label</item>
+        <item quantity="other">%1$d labels</item>
+    </plurals>
+</resources>
