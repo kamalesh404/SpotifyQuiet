@@ -14,12 +14,17 @@ import com.spotifyquiet.app.data.EventKind
 import com.spotifyquiet.app.data.EventLog
 import com.spotifyquiet.app.data.ManualLabel
 import com.spotifyquiet.app.data.PlaybackEvent
+import com.spotifyquiet.app.permissions.AccessibilityAccess
 import com.spotifyquiet.app.permissions.NotificationAccess
+import com.spotifyquiet.app.recovery.AccessibilityRecoveryController
+import com.spotifyquiet.app.recovery.DisabledRecoveryController
 import com.spotifyquiet.app.recovery.ExperimentalRecoveryController
 import com.spotifyquiet.app.recovery.RecoveryController
+import com.spotifyquiet.app.recovery.RecoveryMode
 import com.spotifyquiet.app.recovery.RecoveryOutcome
 import com.spotifyquiet.app.recovery.RecoveryThrottle
 import com.spotifyquiet.app.recovery.SpotifyLauncher
+import com.spotifyquiet.app.service.SpotifyQuietAccessibilityService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,12 +54,29 @@ object MonitoringCoordinator {
     private var sessionConnected = false
     private var notificationVisible = false
     private var notificationAccessGranted = false
+    private var accessibilityServiceGranted = false
     private var autoRecoveryEnabled = false
+    private var recoveryMode = RecoveryMode.LAUNCHER_ONLY
+    private var recoveryStopped = false
     private var lastRecoveryOutcome: RecoveryOutcome? = null
     private var notice: String? = null
     private var listenerServiceConnected = false
 
-    private val recovery: RecoveryController = ExperimentalRecoveryController(throttle)
+    private val disabledRecovery = DisabledRecoveryController()
+    private val recovery: RecoveryController = ExperimentalRecoveryController(
+        throttle,
+        recoveryContextGetter = { appContext },
+    )
+    private val accessibilityRecovery = AccessibilityRecoveryController(
+        throttle = throttle,
+        performerProvider = { SpotifyQuietAccessibilityService.instance },
+    )
+
+    private fun activeController(): RecoveryController = when {
+        !autoRecoveryEnabled || recoveryStopped -> disabledRecovery
+        recoveryMode == RecoveryMode.ACCESSIBILITY -> accessibilityRecovery
+        else -> recovery
+    }
 
     private val _state = MutableStateFlow(MonitorUiState())
     val state: StateFlow<MonitorUiState> = _state.asStateFlow()
@@ -99,8 +121,35 @@ object MonitoringCoordinator {
                 notice = "Notification access was revoked — monitoring stopped",
             )
         }
+        refreshAccessibilityStatus()
         publish()
     }
+
+    @Synchronized
+    fun onAccessibilityServiceConnected() {
+        accessibilityServiceGranted = true
+        notice = "Accessibility service connected"
+        publish()
+    }
+
+    @Synchronized
+    fun onAccessibilityServiceDisconnected() {
+        accessibilityServiceGranted = false
+        if (autoRecoveryEnabled && recoveryMode == RecoveryMode.ACCESSIBILITY) {
+            notice = "Accessibility service was disabled"
+        }
+        publish()
+    }
+
+    @Synchronized
+    fun refreshAccessibilityStatus() {
+        val context = appContext ?: return
+        accessibilityServiceGranted = AccessibilityAccess.isGranted(context)
+    }
+
+    fun isRecoveryArmed(): Boolean = autoRecoveryEnabled && !recoveryStopped
+
+    fun isAutoRecoveryEnabled(): Boolean = autoRecoveryEnabled
 
     // ---------------------------------------------------------------- monitoring
 
@@ -236,21 +285,13 @@ object MonitoringCoordinator {
     // ---------------------------------------------------------------- recovery
 
     private fun handlePossibleRecovery(event: PlaybackEvent) {
-        if (!autoRecoveryEnabled) return
-        val context = appContext ?: return
-        when (val decision = recovery.evaluate(event)) {
+        if (!isRecoveryArmed()) return
+        val controller = activeController()
+        when (val decision = controller.evaluate(event)) {
             RecoveryOutcome.READY -> {
-                val outcome = recovery.attempt(context, "auto after event #${event.id}")
-                recordRecovery(
-                    evidence = listOf(
-                        "automatic recovery attempt after HIGH-confidence possible ad",
-                        "outcome=$outcome",
-                        "Android may refuse background activity starts; verify on device",
-                    ),
-                    classification = event.classification,
-                    confidence = event.confidence,
-                )
-                lastRecoveryOutcome = outcome
+                controller.attempt(event) { outcome ->
+                    onAttemptFinished(event, outcome, automatic = true)
+                }
             }
             RecoveryOutcome.COOLDOWN,
             RecoveryOutcome.LIMIT_REACHED,
@@ -265,26 +306,53 @@ object MonitoringCoordinator {
                     confidence = event.confidence,
                 )
                 lastRecoveryOutcome = decision
+                publish()
             }
             else -> Unit
         }
     }
 
+    private fun onAttemptFinished(
+        event: PlaybackEvent,
+        outcome: RecoveryOutcome,
+        automatic: Boolean,
+    ) {
+        recordRecovery(
+            evidence = listOf(
+                if (automatic) {
+                    "automatic recovery attempt after HIGH-confidence possible ad"
+                } else {
+                    "manual recovery requested by the user"
+                },
+                "outcome=$outcome",
+                "Android may refuse background activity starts; verify on device",
+            ),
+            classification = event.classification,
+            confidence = event.confidence,
+        )
+        lastRecoveryOutcome = outcome
+        publish()
+    }
+
     @Synchronized
     fun manualReopenSpotify(): RecoveryOutcome {
         val context = appContext ?: return RecoveryOutcome.BLOCKED_OR_REJECTED
-        val outcome = SpotifyLauncher.reopen(context)
-        recordRecovery(
-            evidence = listOf(
-                "manual recovery requested by the user",
-                "outcome=$outcome",
-                "this reopens Spotify; Android does not expose a supported API to " +
-                    "silently swipe another app out of Recent Apps",
-            ),
+        val probe = PlaybackEvent(
+            id = engine.nextEventId(),
+            timestampMs = System.currentTimeMillis(),
+            kind = EventKind.RECOVERY,
             classification = Classification.UNKNOWN,
             confidence = Confidence.LOW,
+            title = null,
+            artist = null,
+            album = null,
+            phase = null,
+            positionMs = null,
+            durationMs = null,
+            evidence = emptyList(),
         )
-        lastRecoveryOutcome = outcome
+        val outcome = SpotifyLauncher.reopen(context)
+        onAttemptFinished(probe, outcome, automatic = false)
         notice = when (outcome) {
             RecoveryOutcome.LAUNCHED -> "Reopening Spotify…"
             RecoveryOutcome.NO_SPOTIFY -> "Spotify is not installed"
@@ -295,15 +363,34 @@ object MonitoringCoordinator {
     }
 
     @Synchronized
+    fun setRecoveryMode(mode: RecoveryMode) {
+        recoveryMode = mode
+        if (mode == RecoveryMode.ACCESSIBILITY && !accessibilityServiceGranted) {
+            val context = appContext
+            notice = if (context != null && !AccessibilityAccess.isGranted(context)) {
+                "Enable the accessibility service in Android settings first"
+            } else {
+                "Accessibility mode selected"
+            }
+        } else {
+            notice = "Recovery mode: ${mode.name.lowercase().replace('_', ' ')}"
+        }
+        publish()
+    }
+
+    @Synchronized
     fun setAutoRecoveryEnabled(enabled: Boolean) {
         autoRecoveryEnabled = enabled
         if (enabled) {
+            recoveryStopped = false
             throttle.reset()
             recovery.reset()
-            notice = "Experimental recovery armed: " +
+            accessibilityRecovery.reset()
+            notice = "Automatic recovery armed (${recoveryMode.name.lowercase().replace('_', ' ')}): " +
                 "${RecoveryThrottle.DEFAULT_COOLDOWN_MS / 1000}s cooldown, max " +
                 "${RecoveryThrottle.DEFAULT_MAX_ATTEMPTS} attempts per session"
         } else {
+            recoveryStopped = true
             notice = "Recovery disabled"
         }
         publish()
@@ -311,8 +398,8 @@ object MonitoringCoordinator {
 
     @Synchronized
     fun emergencyStopRecovery() {
-        autoRecoveryEnabled = false
-        recovery.reset()
+        recoveryStopped = true
+        throttle.reset()
         lastRecoveryOutcome = null
         notice = "Recovery stopped and counters reset"
         publish()
@@ -380,6 +467,7 @@ object MonitoringCoordinator {
         _state.value = MonitorUiState(
             monitoring = engine.monitoring,
             notificationAccessGranted = notificationAccessGranted,
+            accessibilityServiceGranted = accessibilityServiceGranted,
             spotifyInstalled = context == null || SpotifyLauncher.SPOTIFY_PACKAGE.let { pkg ->
                 context.packageManager.getLaunchIntentForPackage(pkg) != null
             },
@@ -390,6 +478,7 @@ object MonitoringCoordinator {
             diagnosticLabels = diagnostics.all().associate { it.eventId to it.label },
             diagnosticCount = diagnostics.size,
             autoRecoveryEnabled = autoRecoveryEnabled,
+            recoveryMode = recoveryMode,
             recoveryAttempts = throttle.attempts,
             recoveryAttemptsRemaining = throttle.remainingAttempts(),
             lastRecoveryOutcome = lastRecoveryOutcome,
@@ -411,6 +500,7 @@ object MonitoringCoordinator {
         sessionSnapshot = null
         notificationSnapshot = null
         autoRecoveryEnabled = false
+        recoveryStopped = false
         lastRecoveryOutcome = null
         notice = null
         publish()

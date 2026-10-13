@@ -42,5 +42,25 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!--
+            Optional recovery automation. The user must explicitly enable this
+            in Android's accessibility settings; it is never enabled silently.
+            The service performs the swipe-away-and-reopen gesture on Spotify
+            only, never reads screen content, and acts only on the user's
+            explicit command.
+        -->
+        <service
+            android:name=".service.SpotifyQuietAccessibilityService"
+            android:exported="true"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
     </application>
 </manifest>

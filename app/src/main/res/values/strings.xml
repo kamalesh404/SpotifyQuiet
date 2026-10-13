@@ -23,6 +23,15 @@
 
     <string name="recovery_title">Recovery experiment</string>
     <string name="recovery_enable">Automatic recovery (experimental)</string>
+    <string name="recovery_mode">Recovery mode</string>
+    <string name="mode_launcher">Reopen only</string>
+    <string name="mode_accessibility">Close &amp; reopen</string>
+    <string name="accessibility_service_label">SpotifyQuiet recovery</string>
+    <string name="accessibility_service_description">SpotifyQuiet uses this service only to swipe Spotify out of Recent Apps and reopen it when you explicitly arm the recovery experiment. It never reads or records screen content.</string>
+    <string name="accessibility_explanation">When armed in this mode, SpotifyQuiet may swipe Spotify out of Recent Apps and reopen it within a few seconds after a high-confidence possible ad. The accessibility service only acts on your explicit command, never reads screen content, and can be revoked at any time in system settings. The swipe targets the topmost Recent Apps card (assumed to be Spotify); Android may refuse the background relaunch, so outcomes are logged for verification.</string>
+    <string name="enable_accessibility">Enable accessibility service</string>
+    <string name="accessibility_status_on">Accessibility service enabled</string>
+    <string name="accessibility_status_off">Accessibility service not enabled</string>
     <string name="recovery_description">Off by default. When enabled, SpotifyQuiet may reopen Spotify only after a high-confidence possible advertisement, with a 60 second cooldown and at most 5 attempts per session. Android can refuse to start an app from the background, so outcomes must be verified on the device.</string>
     <string name="recovery_gesture_limitation">Android does not expose a supported API for silently swiping another app out of Recent Apps, so the manual swipe-and-reopen workaround cannot be automated here.</string>
     <string name="recovery_attempts">attempts used: %1$d, remaining: %2$d</string>

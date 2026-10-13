@@ -18,6 +18,11 @@ enum class RecoveryOutcome {
     LAUNCHED,
     BLOCKED_OR_REJECTED,
     NO_SPOTIFY,
+    PARTIAL_CLOSE_FAILED,
+    BLOCKED_ACCESSIBILITY_DISABLED,
+    BLOCKED_LOCKED,
+    BLOCKED_SCREEN_OFF,
+    BLOCKED_RECENTS_FAILED,
 }
 
 /**
@@ -29,8 +34,13 @@ enum class RecoveryOutcome {
  * Android does NOT give a normal app a supported way to swipe another app out
  * of Recent Apps, and background activity starts are restricted since
  * Android 10. Therefore no implementation here may claim to reproduce the
- * manual "swipe away and reopen" gesture, and none of them may restart
- * Spotify in a loop.
+ * manual "swipe away and reopen" gesture with certainty, and none of them may
+ * restart Spotify in a loop. Two modes are offered:
+ * - [RecoveryMode.LAUNCHER_ONLY]: reopens Spotify via a normal launcher intent.
+ * - [RecoveryMode.ACCESSIBILITY]: also attempts to swipe Spotify out of
+ *   Recent Apps using an accessibility gesture. Requires the user to enable
+ *   the accessibility service in system settings; the service never reads
+ *   screen content.
  */
 interface RecoveryController {
     val id: String
@@ -41,8 +51,15 @@ interface RecoveryController {
     /** Pure decision step: may this event trigger a recovery attempt now? */
     fun evaluate(event: PlaybackEvent): RecoveryOutcome
 
-    /** Side-effecting step. Only call after [evaluate] returned READY, or for a manual user action. */
-    fun attempt(context: Context, reason: String): RecoveryOutcome
+    /**
+     * Side-effecting step. Only call after [evaluate] returned READY, or for a
+     * manual user action.
+     *
+     * Implementations must call [onDone] exactly once with the final outcome.
+     * Accessibility-based recovery runs on a short delayed sequence, so
+     * [onDone] may fire after this method returns.
+     */
+    fun attempt(event: PlaybackEvent, onDone: (RecoveryOutcome) -> Unit)
 
     /** Emergency stop: clears state and prevents further automatic attempts. */
     fun reset()
@@ -55,8 +72,9 @@ class DisabledRecoveryController : RecoveryController {
 
     override fun evaluate(event: PlaybackEvent): RecoveryOutcome = RecoveryOutcome.DISABLED
 
-    override fun attempt(context: Context, reason: String): RecoveryOutcome =
-        RecoveryOutcome.DISABLED
+    override fun attempt(event: PlaybackEvent, onDone: (RecoveryOutcome) -> Unit) {
+        onDone(RecoveryOutcome.DISABLED)
+    }
 
     override fun reset() = Unit
 }
@@ -93,16 +111,14 @@ object SpotifyLauncher {
 }
 
 /**
- * Opt-in experiment (disabled by default).
+ * Launcher-only experiment: reopens Spotify via a normal launcher intent.
  *
- * Attempts to reopen Spotify only when the analyzer reports a HIGH-confidence
- * [Classification.POSSIBLE_AD], and only when the cooldown and per-session
- * attempt limit allow it. Android may silently refuse the launch when
- * SpotifyQuiet is in the background; that is recorded as
- * [RecoveryOutcome.BLOCKED_OR_REJECTED] and never retried in a loop.
+ * Disabled by default. Only fires on HIGH-confidence POSSIBLE_AD with cooldown
+ * and per-session attempt limits. Android may refuse background activity starts.
  */
 class ExperimentalRecoveryController(
     private val throttle: RecoveryThrottle = RecoveryThrottle(),
+    private val recoveryContextGetter: () -> Context? = { null },
 ) : RecoveryController {
 
     override val id: String = "experimental-relaunch"
@@ -117,7 +133,6 @@ class ExperimentalRecoveryController(
             return RecoveryOutcome.NOT_AN_AD
         }
         if (event.confidence != Confidence.HIGH) {
-            // Uncertain detections must never interrupt playback.
             return RecoveryOutcome.LOW_CONFIDENCE
         }
         return when (throttle.tryAcquire()) {
@@ -127,8 +142,72 @@ class ExperimentalRecoveryController(
         }
     }
 
-    override fun attempt(context: Context, reason: String): RecoveryOutcome =
-        SpotifyLauncher.reopen(context)
+    override fun attempt(
+        event: PlaybackEvent,
+        onDone: (RecoveryOutcome) -> Unit,
+    ) {
+        val context = recoveryContextGetter() ?: run {
+            onDone(RecoveryOutcome.BLOCKED_OR_REJECTED)
+            return
+        }
+        onDone(SpotifyLauncher.reopen(context))
+    }
+
+    override fun reset() = throttle.reset()
+}
+
+/** Implemented by the accessibility service when it is enabled and running. */
+interface AutoClosePerformer {
+    /**
+     * Perform the swipe-away and reopen sequence. Must call [onDone] exactly
+     * once with the final outcome, on the main thread.
+     */
+    fun perform(onDone: (RecoveryOutcome) -> Unit)
+}
+
+/**
+ * Accessibility-based recovery: swipe Spotify out of Recent Apps, then reopen
+ * it. The only mode that attempts to reproduce the user's manual gesture.
+ *
+ * Requires the user to enable the accessibility service in system settings.
+ * The service never reads screen content and acts only on explicit command.
+ * The swipe targets the topmost Recent Apps card, which is assumed to be
+ * Spotify (the most recently used app); this assumption is recorded in the
+ * log as evidence.
+ */
+class AccessibilityRecoveryController(
+    private val throttle: RecoveryThrottle,
+    private val performerProvider: () -> AutoClosePerformer?,
+) : RecoveryController {
+
+    override val id: String = "accessibility-close-reopen"
+    override val isAutomatic: Boolean = true
+
+    override fun evaluate(event: PlaybackEvent): RecoveryOutcome {
+        if (event.classification != Classification.POSSIBLE_AD) {
+            return RecoveryOutcome.NOT_AN_AD
+        }
+        if (event.confidence != Confidence.HIGH) {
+            return RecoveryOutcome.LOW_CONFIDENCE
+        }
+        return when (throttle.tryAcquire()) {
+            ThrottleResult.GRANTED -> RecoveryOutcome.READY
+            ThrottleResult.COOLDOWN -> RecoveryOutcome.COOLDOWN
+            ThrottleResult.LIMIT_REACHED -> RecoveryOutcome.LIMIT_REACHED
+        }
+    }
+
+    override fun attempt(
+        event: PlaybackEvent,
+        onDone: (RecoveryOutcome) -> Unit,
+    ) {
+        val performer = performerProvider()
+        if (performer == null) {
+            onDone(RecoveryOutcome.BLOCKED_ACCESSIBILITY_DISABLED)
+            return
+        }
+        performer.perform(onDone)
+    }
 
     override fun reset() = throttle.reset()
 }

@@ -30,5 +30,6 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Notification access can be revoked from Settings while we were paused.
         MonitoringCoordinator.refreshPermissionState()
+        MonitoringCoordinator.refreshAccessibilityStatus()
     }
 }

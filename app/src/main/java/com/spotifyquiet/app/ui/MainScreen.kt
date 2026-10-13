@@ -26,6 +26,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -60,7 +61,9 @@ import com.spotifyquiet.app.data.ManualLabel
 import com.spotifyquiet.app.data.PlaybackEvent
 import com.spotifyquiet.app.monitoring.MonitorUiState
 import com.spotifyquiet.app.monitoring.MonitoringCoordinator
+import com.spotifyquiet.app.permissions.AccessibilityAccess
 import com.spotifyquiet.app.permissions.NotificationAccess
+import com.spotifyquiet.app.recovery.RecoveryMode
 import com.spotifyquiet.app.recovery.RecoveryOutcome
 import com.spotifyquiet.app.ui.theme.InfoColor
 import com.spotifyquiet.app.ui.theme.WarningColor
@@ -330,8 +333,10 @@ private fun NoticeCard(notice: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecoverySection(state: MonitorUiState) {
+    val context = LocalContext.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -359,21 +364,72 @@ private fun RecoverySection(state: MonitorUiState) {
                 )
             }
 
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.recovery_description),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = stringResource(R.string.recovery_gesture_limitation),
-                style = MaterialTheme.typography.bodySmall,
-                color = WarningColor,
-            )
-
             if (state.autoRecoveryEnabled) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.recovery_mode),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = state.recoveryMode == RecoveryMode.LAUNCHER_ONLY,
+                        onClick = { MonitoringCoordinator.setRecoveryMode(RecoveryMode.LAUNCHER_ONLY) },
+                        label = { Text(stringResource(R.string.mode_launcher)) },
+                    )
+                    FilterChip(
+                        selected = state.recoveryMode == RecoveryMode.ACCESSIBILITY,
+                        onClick = { MonitoringCoordinator.setRecoveryMode(RecoveryMode.ACCESSIBILITY) },
+                        label = { Text(stringResource(R.string.mode_accessibility)) },
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                when (state.recoveryMode) {
+                    RecoveryMode.ACCESSIBILITY -> {
+                        Text(
+                            text = stringResource(R.string.accessibility_explanation),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        if (state.accessibilityServiceGranted) {
+                            Text(
+                                text = stringResource(R.string.accessibility_status_on),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        } else {
+                            Text(
+                                text = stringResource(R.string.accessibility_status_off),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = WarningColor,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            OutlinedButton(
+                                onClick = { openAccessibilitySettings(context) },
+                            ) {
+                                Text(stringResource(R.string.enable_accessibility))
+                            }
+                        }
+                    }
+                    else -> {
+                        Text(
+                            text = stringResource(R.string.recovery_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.recovery_gesture_limitation),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = WarningColor,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
                 Text(
                     text = stringResource(
                         R.string.recovery_attempts,
@@ -669,6 +725,18 @@ private fun openNotificationAccessSettings(context: Context) {
             // try the next candidate
         } catch (e: SecurityException) {
             // try the next candidate
+        }
+    }
+}
+
+private fun openAccessibilitySettings(context: Context) {
+    try {
+        context.startActivity(AccessibilityAccess.settingsIntent())
+    } catch (e: ActivityNotFoundException) {
+        try {
+            context.startActivity(Intent(Settings.ACTION_SETTINGS))
+        } catch (ignored: ActivityNotFoundException) {
+            // No settings screen available; nothing further to do.
         }
     }
 }

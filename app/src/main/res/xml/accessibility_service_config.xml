@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Minimal, privacy-preserving configuration.
+
+    SpotifyQuiet uses accessibility solely to reproduce the manual
+    "swipe Spotify away from Recent Apps and reopen it" gesture when the user
+    explicitly arms the recovery experiment. The service never reads or
+    records screen content: canRetrieveWindowContent is false, window state
+    events are ignored, and no content is extracted from any other app.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100" />

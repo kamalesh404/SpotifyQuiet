@@ -9,6 +9,7 @@ import com.spotifyquiet.app.recovery.RecoveryOutcome
 data class MonitorUiState(
     val monitoring: Boolean = false,
     val notificationAccessGranted: Boolean = false,
+    val accessibilityServiceGranted: Boolean = false,
     val spotifyInstalled: Boolean = true,
     val sessionConnected: Boolean = false,
     val notificationVisible: Boolean = false,
@@ -17,6 +18,8 @@ data class MonitorUiState(
     val diagnosticLabels: Map<Long, ManualLabel> = emptyMap(),
     val diagnosticCount: Int = 0,
     val autoRecoveryEnabled: Boolean = false,
+    val recoveryMode: com.spotifyquiet.app.recovery.RecoveryMode =
+        com.spotifyquiet.app.recovery.RecoveryMode.DISABLED,
     val recoveryAttempts: Int = 0,
     val recoveryAttemptsRemaining: Int = 0,
     val lastRecoveryOutcome: RecoveryOutcome? = null,
