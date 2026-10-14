@@ -76,8 +76,8 @@ class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerfor
             onDone(RecoveryOutcome.BLOCKED_RECENTS_FAILED)
             return
         }
-        // Give Recents time to animate in before swiping the topmost card.
-        mainHandler.postDelayed({ swipeThenReopen(onDone) }, 1200L)
+        // Give Recents time to fully load before swiping the topmost card.
+        mainHandler.postDelayed({ swipeThenReopen(onDone) }, 1500L)
     }
 
     private fun swipeThenReopen(onDone: (RecoveryOutcome) -> Unit) {
@@ -86,16 +86,26 @@ class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerfor
             return
         }
         val swiped = dispatchSwipeUp()
-        // Give the dismissal animation time to finish before relaunching.
-        mainHandler.postDelayed({
-            val reopened = SpotifyLauncher.reopen(this)
-            onDone(if (swiped) reopened else RecoveryOutcome.PARTIAL_CLOSE_FAILED)
-        }, 900L)
+        if (swiped) {
+            mainHandler.postDelayed({
+                val reopened = SpotifyLauncher.reopen(this)
+                onDone(reopened)
+            }, 900L)
+        } else {
+            // Retry once if the first swipe didn't dismiss the card.
+            mainHandler.postDelayed({
+                val retry = dispatchSwipeUp()
+                mainHandler.postDelayed({
+                    val reopened = SpotifyLauncher.reopen(this)
+                    onDone(if (retry) reopened else RecoveryOutcome.PARTIAL_CLOSE_FAILED)
+                }, 700L)
+            }, 500L)
+        }
     }
 
     /**
-     * Blind upward fling over the centre of the screen, intended to dismiss the
-     * topmost Recent Apps card. We cannot identify the card without reading
+     * Fast upward fling from the lower-middle of the screen, intended to dismiss
+     * the topmost Recent Apps card. We cannot identify the card without reading
      * window content (which we deliberately do not do), so the assumption that
      * the most recent app is Spotify is recorded as evidence in the log.
      */
@@ -104,11 +114,11 @@ class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerfor
         val width = metrics.widthPixels
         val height = metrics.heightPixels
         val path = Path().apply {
-            moveTo(width * 0.5f, height * 0.45f)
-            lineTo(width * 0.5f, height * 0.08f)
+            moveTo(width * 0.5f, height * 0.65f)
+            lineTo(width * 0.5f, height * 0.05f)
         }
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0L, 200L))
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 120L))
             .build()
         return try {
             dispatchGesture(gesture, null, null)
