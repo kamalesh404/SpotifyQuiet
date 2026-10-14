@@ -2,7 +2,6 @@ package com.spotifyquiet.app.service
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.app.KeyguardManager
 import android.content.Context
 import android.graphics.Path
 import android.os.Handler
@@ -37,6 +36,7 @@ import com.spotifyquiet.app.recovery.SpotifyLauncher
 class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerformer {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var recoveryWakeLock: PowerManager.WakeLock? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -52,21 +52,35 @@ class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerfor
         // No long-running work to interrupt.
     }
 
+    /**
+     * Briefly wakes the display so the swipe can land even when the screen is
+     * off. The lock is held for at most 10 seconds and released as soon as the
+     * recovery sequence finishes.
+     */
+    private fun wakeScreenForRecovery() {
+        val power = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        recoveryWakeLock = power.newWakeLock(
+            PowerManager.FULL_WAKE_LOCK or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                PowerManager.ON_AFTER_RELEASE,
+            "SpotifyQuiet::RecoveryWake",
+        ).also { it.acquire(10_000L) }
+    }
+
+    private fun releaseWakeLock() {
+        recoveryWakeLock?.let { if (it.isHeld) it.release() }
+        recoveryWakeLock = null
+    }
+
     override fun onDestroy() {
+        releaseWakeLock()
         instance = null
         MonitoringCoordinator.onAccessibilityServiceDisconnected()
         super.onDestroy()
     }
 
     override fun perform(onDone: (RecoveryOutcome) -> Unit) {
-        if (isKeyguardLocked(this)) {
-            onDone(RecoveryOutcome.BLOCKED_LOCKED)
-            return
-        }
-        if (!isScreenOn(this)) {
-            onDone(RecoveryOutcome.BLOCKED_SCREEN_OFF)
-            return
-        }
+        wakeScreenForRecovery()
         val opened = try {
             performGlobalAction(GLOBAL_ACTION_RECENTS)
         } catch (e: RuntimeException) {
@@ -77,11 +91,12 @@ class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerfor
             return
         }
         // Give Recents time to fully load before swiping the topmost card.
-        mainHandler.postDelayed({ swipeThenReopen(onDone) }, 1500L)
+        mainHandler.postDelayed({ swipeThenReopen(onDone) }, 1000L)
     }
 
     private fun swipeThenReopen(onDone: (RecoveryOutcome) -> Unit) {
         if (!MonitoringCoordinator.isRecoveryArmed()) {
+            releaseWakeLock()
             onDone(RecoveryOutcome.BLOCKED_OR_REJECTED)
             return
         }
@@ -89,17 +104,19 @@ class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerfor
         if (swiped) {
             mainHandler.postDelayed({
                 val reopened = SpotifyLauncher.reopen(this)
+                releaseWakeLock()
                 onDone(reopened)
-            }, 900L)
+            }, 700L)
         } else {
             // Retry once if the first swipe didn't dismiss the card.
             mainHandler.postDelayed({
                 val retry = dispatchSwipeUp()
                 mainHandler.postDelayed({
                     val reopened = SpotifyLauncher.reopen(this)
+                    releaseWakeLock()
                     onDone(if (retry) reopened else RecoveryOutcome.PARTIAL_CLOSE_FAILED)
-                }, 700L)
-            }, 500L)
+                }, 500L)
+            }, 400L)
         }
     }
 
@@ -125,16 +142,6 @@ class SpotifyQuietAccessibilityService : AccessibilityService(), AutoClosePerfor
         } catch (e: RuntimeException) {
             false
         }
-    }
-
-    private fun isKeyguardLocked(context: Context): Boolean {
-        val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        return keyguard?.isDeviceLocked == true
-    }
-
-    private fun isScreenOn(context: Context): Boolean {
-        val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        return power?.isInteractive == true
     }
 
     companion object {
