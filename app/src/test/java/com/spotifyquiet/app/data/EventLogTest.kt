@@ -62,6 +62,18 @@ class EventLogTest {
         assertTrue(log.isEmpty)
     }
 
+    @Test
+    fun exportAsTextFormatsEmptyAndPopulatedLog() {
+        val log = EventLog(maxSize = 5)
+        assertEquals("No events recorded.", log.exportAsText())
+
+        log.add(event(1, "Test Song"))
+        val text = log.exportAsText()
+        assertTrue(text.contains("SpotifyQuiet Event Log (1 events)"))
+        assertTrue(text.contains("Test Song"))
+        assertTrue(text.contains("NORMAL_PLAYBACK"))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun nonPositiveMaxSizeIsRejected() {
         EventLog(maxSize = 0)

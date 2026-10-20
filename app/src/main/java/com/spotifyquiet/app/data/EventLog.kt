@@ -32,6 +32,21 @@ class EventLog(val maxSize: Int = DEFAULT_MAX_SIZE) {
 
     fun snapshot(): List<PlaybackEvent> = items.toList()
 
+    fun exportAsText(): String = buildString {
+        if (items.isEmpty()) {
+            append("No events recorded.")
+            return@buildString
+        }
+        appendLine("=== SpotifyQuiet Event Log (${items.size} events) ===")
+        for (event in items) {
+            appendLine("[#${event.id} @ ${event.timestampMs}ms] ${event.kind} -> ${event.classification} (${event.confidence})")
+            appendLine("  Track: ${event.summary()} | Phase: ${event.phase ?: "—"}")
+            if (event.evidence.isNotEmpty()) {
+                appendLine("  Evidence: ${event.evidence.joinToString("; ")}")
+            }
+        }
+    }
+
     fun clear() = items.clear()
 
     companion object {
